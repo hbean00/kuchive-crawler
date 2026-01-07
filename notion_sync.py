@@ -3,7 +3,7 @@ import json
 import requests
 
 NOTION_TOKEN = os.getenv("NOTION_TOKEN", "")
-DATABASE_ID = os.getenv("NOTION_DATABASE_ID", "")
+DATABASE_ID = os.getenv("NOTION_DB_ID", "")
 NOTION_VERSION = "2022-06-28"
 
 HEADERS = {
