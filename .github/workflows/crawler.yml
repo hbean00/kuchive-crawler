@@ -23,11 +23,18 @@ jobs:
       - name: Crawl
         run: |
           python crawl_kuchive.py
-
-      - name: Sync to Notion
-        env:
-          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
-          NOTION_DB_ID: ${{ secrets.NOTION_DB_ID }}
-          KUCHIVE_JSON: kuchive_items.json
+      - name: Inspect generated JSON
         run: |
-          python notion_sync.py
+          echo "===== FILE LIST ====="
+          ls -la
+          echo "===== JSON HEAD ====="
+          cat kuchive_items.json | head -n 40
+
+      
+      # - name: Sync to Notion
+      #   env:
+      #     NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+      #     NOTION_DB_ID: ${{ secrets.NOTION_DB_ID }}
+      #     KUCHIVE_JSON: kuchive_items.json
+      #   run: |
+      #     python notion_sync.py
