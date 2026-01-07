@@ -1,0 +1,27 @@
+name: KUchive Crawler
+
+on:
+  schedule:
+    - cron: '0 0 * * *'    # 09:00 KST
+    - cron: '0 6 * * *'    # 15:00 KST
+    - cron: '0 12 * * *'   # 21:00 KST
+    - cron: '0 18 * * *'   # 03:00 KST
+  workflow_dispatch:
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Run crawler
+        run: python crawl_kuchive.py
