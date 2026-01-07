@@ -45,7 +45,9 @@ def build_properties(item: dict):
             "select": {"name": item.get("status", "기타")},
         },
         "Program type": {
-            "rich_text": [{"text": {"content": item.get("program_type", "")[:2000]}}],
+            "multi_select": [
+                {"name": item.get("program_type", "기타")}
+            ]
         },
         "org": {
             "rich_text": [{"text": {"content": item.get("org", "")[:2000]}}],
