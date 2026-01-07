@@ -1,0 +1,34 @@
+name: KUchive Crawler
+
+on:
+  schedule:
+    # 한국시간 기준 하루 4회 (UTC 기준으로 맞춤)
+    - cron: '0 0 * * *'   # 09:00 KST
+    - cron: '0 6 * * *'   # 15:00 KST
+    - cron: '0 12 * * *'  # 21:00 KST
+    - cron: '0 18 * * *'  # 03:00 KST
+  workflow_dispatch:     # 수동 실행 버튼도 추가
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+
+    - name: Run crawler
+      env:
+        NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+        NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+      run: |
+        python crawl_kuchive.py
