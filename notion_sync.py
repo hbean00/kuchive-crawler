@@ -1,68 +1,67 @@
 import os
-import re
 import json
-import requests
-from datetime import datetime, timezone
+from notion_client import Client
 
 NOTION_TOKEN = os.environ["NOTION_TOKEN"]
-DATABASE_ID = os.environ["NOTION_DATABASE_ID"]
+DATABASE_ID = os.environ["NOTION_DB_ID"]
+JSON_PATH = os.environ.get("KUCHIVE_JSON", "kuchive_items.json")
 
-NOTION_VERSION = "2022-06-28"
-HEADERS = {
-    "Authorization": f"Bearer {NOTION_TOKEN}",
-    "Notion-Version": NOTION_VERSION,
-    "Content-Type": "application/json",
-}
+notion = Client(auth=NOTION_TOKEN)
 
-# ---------- helpers ----------
-def _req(method, url, **kwargs):
-    r = requests.request(method, url, headers=HEADERS, timeout=30, **kwargs)
-    try:
-        r.raise_for_status()
-    except requests.HTTPError as e:
-        # 에러 원인 바로 보이게
-        print("Notion API Error:", r.status_code, r.text)
-        raise
-    return r.json()
 
-def parse_korean_datetime(s: str) -> str | None:
+def query_page_by_enc(enc: str):
     """
-    '2026.01.16 15:00' -> '2026-01-16T15:00:00+09:00'
+    encSddpbSeq(text) 프로퍼티가 enc와 같은 페이지를 찾는다.
     """
-    if not s:
+    if not enc:
         return None
-    s = s.strip()
-    m = re.match(r"(\d{4})\.(\d{2})\.(\d{2})\s+(\d{2}):(\d{2})", s)
-    if not m:
-        return None
-    y, mo, d, hh, mm = map(int, m.groups())
-    # KST +09:00
-    return f"{y:04d}-{mo:02d}-{d:02d}T{hh:02d}:{mm:02d}:00+09:00"
 
-def query_by_enc(enc: str) -> str | None:
-    url = f"https://api.notion.com/v1/databases/{DATABASE_ID}/query"
-    payload = {
-        "filter": {
+    resp = notion.databases.query(
+        database_id=DATABASE_ID,
+        filter={
             "property": "encSddpbSeq",
-            "rich_text": {"equals": enc}
-        }
-    }
-    data = _req("POST", url, json=payload)
-    results = data.get("results", [])
-    return results[0]["id"] if results else None
+            "rich_text": {"equals": enc},
+        },
+    )
+    results = resp.get("results", [])
+    return results[0] if results else None
 
-def make_page_properties(item: dict) -> dict:
-    # DB 컬럼명 네가 만든 것과 1:1로 맞춰둠
+
+def build_properties(item: dict):
+    """
+    네 DB 스키마에 정확히 매핑
+    - Name: title
+    - Select: select
+    - Apply Start/End: date
+    - Program type/org/encSddpbSeq: text
+    - URL: url
+    - D-day: number
+    """
     props = {
-        "Name": {"title": [{"text": {"content": item["title"]}}]},
-        "Status": {"select": {"name": item.get("status", "모집중")}},
-        "Org": {"rich_text": [{"text": {"content": item.get("org", "")}}]},
-        "Program Type": {"select": {"name": item.get("ptype", "기타")}},
-        "encSddpbSeq": {"rich_text": [{"text": {"content": item["enc"]}}]},
-        "URL": {"url": item.get("url", "")},
+        "Name": {
+            "title": [{"text": {"content": item.get("title", "")[:2000]}}],
+        },
+        "Select": {
+            "select": {"name": item.get("status", "기타")},
+        },
+        "Program type": {
+            "rich_text": [{"text": {"content": item.get("program_type", "")[:2000]}}],
+        },
+        "org": {
+            "rich_text": [{"text": {"content": item.get("org", "")[:2000]}}],
+        },
+        "encSddpbSeq": {
+            "rich_text": [{"text": {"content": (item.get("encSddpbSeq") or "")[:2000]}}],
+        },
+        "URL": {
+            "url": item.get("url") or None,
+        },
+        "D-day": {
+            "number": item.get("d_day") if isinstance(item.get("d_day"), int) else None,
+        },
     }
 
-    # Date properties
+    # Date는 None이면 프로퍼티를 아예 빼는 게 가장 안전(노션 오류 방지)
     if item.get("apply_start"):
         props["Apply Start"] = {"date": {"start": item["apply_start"]}}
     if item.get("apply_end"):
@@ -70,65 +69,39 @@ def make_page_properties(item: dict) -> dict:
 
     return props
 
-def create_page(item: dict):
-    url = "https://api.notion.com/v1/pages"
-    payload = {
-        "parent": {"database_id": DATABASE_ID},
-        "properties": make_page_properties(item),
-    }
-    _req("POST", url, json=payload)
-    print(f"created: {item['enc']} | {item['title']}")
 
-def update_page(page_id: str, item: dict):
-    url = f"https://api.notion.com/v1/pages/{page_id}"
-    payload = {"properties": make_page_properties(item)}
-    _req("PATCH", url, json=payload)
-    print(f"updated: {item['enc']} | {item['title']}")
+def upsert_item(item: dict):
+    enc = item.get("encSddpbSeq")
+    props = build_properties(item)
 
-def upsert(item: dict):
-    page_id = query_by_enc(item["enc"])
-    if page_id:
-        update_page(page_id, item)
+    existing = query_page_by_enc(enc) if enc else None
+    if existing:
+        notion.pages.update(page_id=existing["id"], properties=props)
+        return "updated"
     else:
-        create_page(item)
+        notion.pages.create(
+            parent={"database_id": DATABASE_ID},
+            properties=props,
+        )
+        return "created"
 
-# ---------- main ----------
-if __name__ == "__main__":
-    """
-    입력 데이터 형식(크롤러 출력 JSON 가정):
-    [
-      {
-        "enc": "...",
-        "title": "...",
-        "org": "...",
-        "ptype": "...",
-        "apply_period": "2025.12.08 13:25 ~ 2026.01.16 15:00",
-        "url": "..."
-      },
-      ...
-    ]
-    """
-    input_path = os.environ.get("KUCHIVE_JSON", "kuchive_items.json")
 
-    with open(input_path, "r", encoding="utf-8") as f:
+def main():
+    with open(JSON_PATH, "r", encoding="utf-8") as f:
         items = json.load(f)
 
-    # status 계산 예시 (원하면 더 정교화 가능)
-    now = datetime.now(timezone.utc)  # 비교만 할거라 UTC로 둠
+    created = 0
+    updated = 0
+
     for it in items:
-        # 신청기간 파싱
-        ap = it.get("apply_period", "")
-        # "start ~ end" 형태에서 각각 뽑기
-        start_s, end_s = None, None
-        if "~" in ap:
-            parts = [p.strip() for p in ap.split("~")]
-            if len(parts) == 2:
-                start_s, end_s = parts
+        result = upsert_item(it)
+        if result == "created":
+            created += 1
+        else:
+            updated += 1
 
-        it["apply_start"] = parse_korean_datetime(start_s) if start_s else None
-        it["apply_end"] = parse_korean_datetime(end_s) if end_s else None
+    print(f"SYNC DONE. created={created}, updated={updated}, total={len(items)}")
 
-        # 기본 status (크롤링이 모집중 탭이면 모집중으로 고정해도 됨)
-        it["status"] = it.get("status", "모집중")
 
-        upsert(it)
+if __name__ == "__main__":
+    main()
