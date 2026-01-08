@@ -118,9 +118,43 @@ def parse_programs(html: str) -> list[dict]:
                 enc = m.group(1)
 
         # URL (enc 기반) - "맨 뒤"로 append할 거라 변수만 준비
-        url = ""
-        if enc:
-            url = f"{BASE}/ptfol/imng/icmpNsbjtPgm/5a2da4784090946376d0733cab816f04/findIcmpNsbjtPgmView.do?encSddpbSeq={enc}"
+        # url = ""
+        # if enc:
+        #     url = f"{BASE}/ptfol/imng/icmpNsbjtPgm/5a2da4784090946376d0733cab816f04/findIcmpNsbjtPgmView.do?encSddpbSeq={enc}"
+                # encSddpbSeq + paginationInfo.currentPageNo
+        enc = None
+        current_page_no = None
+
+        # 1) title_a에서 먼저 시도
+        if title_a.has_attr("data-params"):
+            dp = title_a["data-params"]
+            m = re.search(r'"encSddpbSeq"\s*:\s*"([^"]+)"', dp)
+            if m:
+                enc = m.group(1)
+
+            m2 = re.search(r'"paginationInfo\.currentPageNo"\s*:\s*"([^"]+)"', dp)
+            if m2:
+                current_page_no = m2.group(1)
+
+        # 2) title_a에 pageNo가 없으면 detailBtn 중 paginationInfo 있는 걸 탐색
+        if current_page_no is None:
+            for a in li.select("a.detailBtn[data-params]"):
+                dp = a.get("data-params", "")
+                if enc is None:
+                    m = re.search(r'"encSddpbSeq"\s*:\s*"([^"]+)"', dp)
+                    if m:
+                        enc = m.group(1)
+
+                m2 = re.search(r'"paginationInfo\.currentPageNo"\s*:\s*"([^"]+)"', dp)
+                if m2:
+                    current_page_no = m2.group(1)
+
+                if enc and current_page_no:
+                    break
+
+        # URL 생성 (실제 접근 가능한 Info 페이지)
+        url = build_info_url(enc, current_page_no)
+
 
         # ===== 인원 파싱 (현재 신청 / 대기 / 정원) =====
         applicants = waitlist = capacity = None
@@ -158,6 +192,16 @@ def parse_programs(html: str) -> list[dict]:
         })
 
     return results
+    
+def build_info_url(enc: str, page_no: str | int | None) -> str:
+    if not enc:
+        return ""
+    p = str(page_no) if page_no else "1"
+    return (
+        f"{BASE}/ptfol/imng/icmpNsbjtPgm/5a2da4784090946376d0733cab816f04/"
+        f"findIcmpNsbjtPgmInfo.do?paramStart=paramStart&encSddpbSeq={enc}"
+        f"&paginationInfo.currentPageNo={p}"
+    )
 
 
 def main():
