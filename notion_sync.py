@@ -53,24 +53,59 @@ def notion_update_page(page_id: str, props: dict):
     return r.json()
 
 def build_props(it: dict) -> dict:
-    # Select 컬럼 타입이 checkbox라고 가정(원하면 select로도 바꿔줄게)
-    props = {
-        "Name": {"title": [{"text": {"content": it.get("title", "")[:200]}}]},
-        "Select": {"checkbox": False},
+    title = (it.get("title") or "")[:200]
+    d_day = it.get("d_day")
+    program_type = it.get("program_type") or "기타"
 
+    capacity = it.get("capacity")
+    applicants = it.get("applicants")
+    waitlist = it.get("waitlist")
+
+    # ---- 상태 멀티셀렉트 결정 ----
+    raw_status = (it.get("status") or "").strip()
+
+    status_tags = []
+    if raw_status == "마감":
+        status_tags = ["마감"]
+    else:
+        # 모집중/기타는 수치 기반으로 재판정
+        # 최악 케이스: capacity None/0이면 비교 불가 -> '신청가능'로 두되, 필요하면 '확인필요' 같은 태그로 바꿔도 됨
+        if capacity is not None and capacity > 0 and applicants is not None:
+            if applicants >= capacity:
+                status_tags = ["정원 초과"]
+            else:
+                status_tags = ["신청가능"]
+        else:
+            status_tags = ["신청가능"]
+
+    props = {
+        # Title
+        "Name": {"title": [{"text": {"content": title}}]},
+
+        # 날짜
         "Apply Start": {"date": {"start": it.get("apply_start")}} if it.get("apply_start") else {"date": None},
         "Apply End": {"date": {"start": it.get("apply_end")}} if it.get("apply_end") else {"date": None},
 
-        # 핵심: multi_select
-        "Program type": {"multi_select": [{"name": it.get("program_type", "기타")}]},
+        # Program type (multi_select)
+        "Program type": {"multi_select": [{"name": program_type}]},
 
+        # org / enc / url / d-day
         "org": {"rich_text": [{"text": {"content": it.get("org", "")}}]},
         "encSddpbSeq": {"rich_text": [{"text": {"content": it.get("encSddpbSeq", "")}}]},
-
+        "D-day": {"number": d_day} if d_day is not None else {"number": None},
         "URL": {"url": it.get("url", "")},
-        "D-day": {"number": it.get("d_day")} if it.get("d_day") is not None else {"number": None},
+
+        # ---- 인원 컬럼(숫자 타입이어야 함) ----
+        "정원": {"number": capacity} if capacity is not None else {"number": None},
+        "신청": {"number": applicants} if applicants is not None else {"number": None},
+        "대기": {"number": waitlist} if waitlist is not None else {"number": None},
+
+        # ---- 상태(멀티셀렉트) ----
+        "상태": {"multi_select": [{"name": s} for s in status_tags]},
     }
+
     return props
+
 
 def upsert_item(it: dict):
     enc = it.get("encSddpbSeq", "")
