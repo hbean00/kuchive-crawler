@@ -36,6 +36,14 @@ def safe_text(el):
     return el.get_text(strip=True) if el else ""
 
 
+def parse_int(text: str):
+    """콤마/공백/'명' 등 섞여 있어도 숫자만 추출해 int로 변환. 없으면 None."""
+    if text is None:
+        return None
+    s = re.sub(r"[^\d]", "", str(text))
+    return int(s) if s else None
+
+
 def parse_d_day(text: str):
     m = re.search(r"D-(\d+)", text or "")
     return int(m.group(1)) if m else None
@@ -63,7 +71,6 @@ def parse_period_to_dates(period: str):
     if not period:
         return None, None
 
-    # 날짜(yyyy.mm.dd) 2개를 찾는다
     dates = re.findall(r"(\d{4})\.(\d{2})\.(\d{2})", period)
     if len(dates) >= 2:
         s = "-".join(dates[0])
@@ -101,6 +108,7 @@ def parse_programs(html: str) -> list[dict]:
 
         period_dds = li.select("div.etc_cont li.date dd, div.etc_cont li.ac_date dd")
         apply_period = safe_text(period_dds[0]) if len(period_dds) > 0 else ""
+        apply_start, apply_end = parse_period_to_dates(apply_period)
 
         # encSddpbSeq
         enc = None
@@ -109,24 +117,44 @@ def parse_programs(html: str) -> list[dict]:
             if m:
                 enc = m.group(1)
 
-        # URL (enc 기반)
+        # URL (enc 기반) - "맨 뒤"로 append할 거라 변수만 준비
         url = ""
         if enc:
             url = f"{BASE}/ptfol/imng/icmpNsbjtPgm/5a2da4784090946376d0733cab816f04/findIcmpNsbjtPgmView.do?encSddpbSeq={enc}"
 
-        apply_start, apply_end = parse_period_to_dates(apply_period)
+        # ===== 인원 파싱 (현재 신청 / 대기 / 정원) =====
+        applicants = waitlist = capacity = None
+        cnt_li = li.select_one("div.etc_cont li.cnt")
+        if cnt_li:
+            for dl in cnt_li.select("dl"):
+                dt = safe_text(dl.select_one("dt"))
+                dd = safe_text(dl.select_one("dd"))
+                if "신청자" in dt:
+                    applicants = parse_int(dd)
+                elif "대기자" in dt:
+                    waitlist = parse_int(dd)
+                elif "모집정원" in dt:
+                    capacity = parse_int(dd)
 
+        # ===== results.append: 요청한 키 순서로 정렬 =====
         results.append({
-            # Notion 매핑용 키(최종)
             "title": title,
+
+            # 제목 바로 다음: 인원 3종
+            "capacity": capacity,           # 모집정원
+            "applicants": applicants,       # 현재 신청 인원
+            "waitlist": waitlist,           # 대기 인원
+
             "status": status,
-            "apply_start": apply_start,  # YYYY-MM-DD or None
+            "apply_start": apply_start,
             "apply_end": apply_end,
             "program_type": category,
             "org": org,
-            "encSddpbSeq": enc,
-            "url": url,
             "d_day": d_day,
+
+            # 링크는 맨 뒤
+            "url": url,
+            "encSddpbSeq": enc,
         })
 
     return results
@@ -141,6 +169,7 @@ def main():
         print(f"\n===== PAGE {page} : {len(programs)} items =====")
         for p in programs:
             print(f"- [{p['d_day'] if p['d_day'] is not None else 'D-?'}] {p['title']} / {p['org']} / {p['program_type']}")
+            print(f"  인원(정원/신청/대기): {p.get('capacity')} / {p.get('applicants')} / {p.get('waitlist')}")
             print(f"  상태: {p['status']}")
             print(f"  Apply Start: {p['apply_start']}, Apply End: {p['apply_end']}")
             if p["encSddpbSeq"]:
