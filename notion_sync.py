@@ -10,6 +10,11 @@ DATABASE_ID = os.getenv("NOTION_DB_ID", "")
 NOTION_VERSION = "2022-06-28"
 KST = timezone(timedelta(hours=9))
 
+APPLY_END_PROP = "Apply End"
+STATUS_PROP    = "상태"
+CLOSED_TAG     = "마감"
+DRY_RUN_CLOSE  = False
+
 HEADERS = {
     "Authorization": f"Bearer {NOTION_TOKEN}",
     "Notion-Version": NOTION_VERSION,
