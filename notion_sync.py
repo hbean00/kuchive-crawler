@@ -121,7 +121,8 @@ def upsert_item(it: dict):
     else:
         notion_create_page(props)
         return "created"
-def _extract_title(page: Dict[str, Any]) -> str:
+
+def _extract_title(page: dict) -> str:
     props = page.get("properties", {})
     # title 타입 속성 찾아서 반환
     for v in props.values():
@@ -131,7 +132,7 @@ def _extract_title(page: Dict[str, Any]) -> str:
     return "(no title)"
 
 
-def _get_date_start(page: Dict[str, Any], prop: str) -> Optional[str]:
+def _get_date_start(page: dict, prop: str):
     p = page.get("properties", {}).get(prop)
     if not p or p.get("type") != "date":
         return None
@@ -141,7 +142,7 @@ def _get_date_start(page: Dict[str, Any], prop: str) -> Optional[str]:
     return d.get("start")
 
 
-def _has_closed_tag(page: Dict[str, Any]) -> bool:
+def _has_closed_tag(page: dict) -> bool:
     p = page.get("properties", {}).get(STATUS_PROP)
     if not p:
         return False
@@ -159,9 +160,9 @@ def _has_closed_tag(page: Dict[str, Any]) -> bool:
     return False
 
 
-def notion_query_all_pages(filter_payload: Optional[dict] = None) -> List[Dict[str, Any]]:
+def notion_query_all_pages(filter_payload: dict = None):
     url = f"https://api.notion.com/v1/databases/{DATABASE_ID}/query"
-    results: List[Dict[str, Any]] = []
+    results = []
     start_cursor = None
 
     while True:
@@ -174,6 +175,7 @@ def notion_query_all_pages(filter_payload: Optional[dict] = None) -> List[Dict[s
         r = requests.post(url, headers=HEADERS, json=payload, timeout=30)
         if not r.ok:
             print("DB QUERY FAILED:", r.status_code, r.text)
+            print("SENT PAYLOAD:", json.dumps(payload, ensure_ascii=False, indent=2))
             r.raise_for_status()
 
         data = r.json()
@@ -192,8 +194,6 @@ def mark_expired_as_closed():
     now_kst = datetime.now(tz=KST)
     today_start_kst = now_kst.replace(hour=0, minute=0, second=0, microsecond=0)
 
-    # Notion filter는 "before 특정 시각" 가능
-    # 오늘 00:00 이전(= 어제까지)을 가져온다.
     cutoff_iso = today_start_kst.isoformat()
 
     filter_payload = {
@@ -223,15 +223,14 @@ def mark_expired_as_closed():
         print("[CLOSE] DRY_RUN_CLOSE=True, no updates applied.")
         return
 
-    # 실제 업데이트
     for page_id, _, _ in to_close:
-        # 네 스키마가 multi_select이므로 "마감"만 남기도록 overwrite
         props = {
             STATUS_PROP: {"multi_select": [{"name": CLOSED_TAG}]}
         }
         notion_update_page(page_id, props)
 
     print("[CLOSE] DONE")
+
 
 def main():
     if not NOTION_TOKEN or not DATABASE_ID:
