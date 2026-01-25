@@ -121,6 +121,117 @@ def upsert_item(it: dict):
     else:
         notion_create_page(props)
         return "created"
+def _extract_title(page: Dict[str, Any]) -> str:
+    props = page.get("properties", {})
+    # title 타입 속성 찾아서 반환
+    for v in props.values():
+        if v.get("type") == "title":
+            arr = v.get("title", [])
+            return "".join([t.get("plain_text", "") for t in arr]) or "(no title)"
+    return "(no title)"
+
+
+def _get_date_start(page: Dict[str, Any], prop: str) -> Optional[str]:
+    p = page.get("properties", {}).get(prop)
+    if not p or p.get("type") != "date":
+        return None
+    d = p.get("date")
+    if not d:
+        return None
+    return d.get("start")
+
+
+def _has_closed_tag(page: Dict[str, Any]) -> bool:
+    p = page.get("properties", {}).get(STATUS_PROP)
+    if not p:
+        return False
+
+    # 네 스키마: multi_select
+    if p.get("type") == "multi_select":
+        tags = p.get("multi_select", [])
+        return any(t.get("name") == CLOSED_TAG for t in tags)
+
+    # 혹시 Status 타입으로 바꾼 경우도 대비
+    if p.get("type") == "status":
+        st = p.get("status")
+        return (st or {}).get("name") == CLOSED_TAG
+
+    return False
+
+
+def notion_query_all_pages(filter_payload: Optional[dict] = None) -> List[Dict[str, Any]]:
+    url = f"https://api.notion.com/v1/databases/{DATABASE_ID}/query"
+    results: List[Dict[str, Any]] = []
+    start_cursor = None
+
+    while True:
+        payload = {"page_size": 100}
+        if filter_payload:
+            payload.update(filter_payload)
+        if start_cursor:
+            payload["start_cursor"] = start_cursor
+
+        r = requests.post(url, headers=HEADERS, json=payload, timeout=30)
+        if not r.ok:
+            print("DB QUERY FAILED:", r.status_code, r.text)
+            r.raise_for_status()
+
+        data = r.json()
+        results.extend(data.get("results", []))
+
+        if not data.get("has_more"):
+            break
+        start_cursor = data.get("next_cursor")
+
+    return results
+
+
+def mark_expired_as_closed():
+    # 정책: "마감직전 = 마감 당일"
+    # => Apply End가 "오늘(00:00 KST)" 보다 이전이면 마감으로 전환
+    now_kst = datetime.now(tz=KST)
+    today_start_kst = now_kst.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # Notion filter는 "before 특정 시각" 가능
+    # 오늘 00:00 이전(= 어제까지)을 가져온다.
+    cutoff_iso = today_start_kst.isoformat()
+
+    filter_payload = {
+        "filter": {
+            "property": APPLY_END_PROP,
+            "date": {"before": cutoff_iso}
+        }
+    }
+
+    pages = notion_query_all_pages(filter_payload=filter_payload)
+    print(f"[CLOSE] candidates(before {cutoff_iso}): {len(pages)}")
+
+    to_close = []
+    for page in pages:
+        if _has_closed_tag(page):
+            continue
+        page_id = page["id"]
+        title = _extract_title(page)
+        apply_end = _get_date_start(page, APPLY_END_PROP)
+        to_close.append((page_id, title, apply_end))
+
+    print(f"[CLOSE] to update: {len(to_close)}")
+    for page_id, title, apply_end in to_close:
+        print(f" - {title} | Apply End={apply_end} -> {CLOSED_TAG}")
+
+    if DRY_RUN_CLOSE:
+        print("[CLOSE] DRY_RUN_CLOSE=True, no updates applied.")
+        return
+
+    # 실제 업데이트
+    for page_id, _, _ in to_close:
+        # 네 스키마가 multi_select이므로 "마감"만 남기도록 overwrite
+        props = {
+            STATUS_PROP: {"multi_select": [{"name": CLOSED_TAG}]}
+        }
+        notion_update_page(page_id, props)
+
+    print("[CLOSE] DONE")
 
 def main():
     if not NOTION_TOKEN or not DATABASE_ID:
@@ -141,6 +252,7 @@ def main():
             raise
 
     print("DONE:", {"created": created, "updated": updated, "skipped": skipped})
+    mark_expired_as_closed()
 
 if __name__ == "__main__":
     main()
