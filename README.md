@@ -1,4 +1,4 @@
-# KUchive 자동화 프로젝트
+# KUchive : 비교과 신청 도우미
 
 https://gossamer-taker-cfa.notion.site/KUchive-2e1e9ba202158048ae71c8dec7425edf
 
