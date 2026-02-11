@@ -1,5 +1,6 @@
 # KUchive : 비교과 신청 도우미
 
+작품 Site
 https://gossamer-taker-cfa.notion.site/KUchive-2e1e9ba202158048ae71c8dec7425edf
 
 ## 개요
